@@ -5,6 +5,7 @@ import {
 	type SystemContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
 import OpenAI from "openai";
+import { isDailyBudgetExhausted, recordTokenUsage } from "./dailyBudget.js";
 
 /**
  * Provider-neutral chat completion.
@@ -131,6 +132,14 @@ export function isLlmConfigured(): boolean {
 	return Boolean(process.env.OPENROUTER_API_KEY);
 }
 
+/**
+ * Configured and within the daily token budget (see dailyBudget.ts).
+ * Call sites use this to decide between the LLM and their fallback.
+ */
+export async function isLlmAvailable(): Promise<boolean> {
+	return isLlmConfigured() && !(await isDailyBudgetExhausted());
+}
+
 let _openRouter: OpenAI | null = null;
 function getOpenRouter(): OpenAI {
 	if (!_openRouter) {
@@ -156,9 +165,14 @@ function getBedrock(): BedrockRuntimeClient {
 export async function chatCompletion(
 	request: ChatRequest,
 ): Promise<ChatResponse> {
-	return getLlmProvider() === "bedrock"
-		? bedrockCompletion(request)
-		: openRouterCompletion(request);
+	const response =
+		getLlmProvider() === "bedrock"
+			? await bedrockCompletion(request)
+			: await openRouterCompletion(request);
+	await recordTokenUsage(
+		(response.tokensInput ?? 0) + (response.tokensOutput ?? 0),
+	);
+	return response;
 }
 
 async function openRouterCompletion(

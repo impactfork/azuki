@@ -44,3 +44,7 @@ data-refresh-summary.json
 shared/data/dazubi-trainee-starts.json
 shared/data/popularity-index.json
 shared/data/availability-by-state.json
+
+# SST (AWS deployment)
+.sst
+sst-env.d.ts

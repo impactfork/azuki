@@ -16,9 +16,21 @@ concurrency:
 
 jobs:
   # Runs npm install scripts, so it gets no write token.
+  # id-token: write only lets it assume the Bedrock-only role below (AWS
+  # deployment, see sst.config.ts DataRefreshRole); no repo write access.
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Repo variable AWS_BEDROCK_ROLE_ARN set: LLM calls go to Amazon Bedrock
+      # (EU profile). Unset: OpenRouter via secrets.OPENROUTER_API_KEY.
+      LLM_PROVIDER: ${{ vars.AWS_BEDROCK_ROLE_ARN && 'bedrock' || 'openrouter' }}
+      BEDROCK_MODEL_ID: eu.anthropic.claude-sonnet-5-5
+      BEDROCK_EFFORT: low
+      AWS_REGION: eu-central-1
     steps:
       - name: Checkout code ⬇️
         uses: actions/checkout@v4
@@ -33,6 +45,13 @@ jobs:
 
       - name: Install dependencies 📦
         run: npm ci
+
+      - name: AWS credentials for Bedrock 🔑
+        if: vars.AWS_BEDROCK_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_BEDROCK_ROLE_ARN }}
+          aws-region: eu-central-1
 
       - name: Fetch BERUFENET catalog 🌐
         run: npm run data:fetch-berufe

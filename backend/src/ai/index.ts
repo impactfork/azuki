@@ -20,7 +20,7 @@ import {
 	resolvePreferredJobs,
 } from "../matching/resolvePreferredJobs.js";
 import { FINAL_MATCH_COUNT, PREFILTER_TOP_K } from "../matching/index.js";
-import { chatCompletion, isLlmConfigured, type ChatResponse } from "./llm.js";
+import { chatCompletion, isLlmAvailable, type ChatResponse } from "./llm.js";
 import {
 	EDUCATION_LABELS,
 	INTEREST_LABELS,
@@ -1095,8 +1095,10 @@ export async function aiRank(
 	profile: UserProfile,
 	options: AiRankOptions = {},
 ): Promise<MatchResult> {
-	if (!isLlmConfigured()) {
-		console.warn("LLM not configured — returning pre-filter results");
+	if (!(await isLlmAvailable())) {
+		console.warn(
+			"LLM unavailable (not configured or daily budget reached) — returning pre-filter results",
+		);
 		return fallbackResult(scored);
 	}
 

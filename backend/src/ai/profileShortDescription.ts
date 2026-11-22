@@ -1,5 +1,5 @@
 import { type UserProfile, DEFAULT_MODEL_ID } from "@azuki/shared";
-import { chatCompletion, isLlmConfigured } from "./llm.js";
+import { chatCompletion, isLlmAvailable } from "./llm.js";
 import { INTEREST_LABELS, SUBJECT_LABELS, STRENGTH_LABELS } from "./labels.js";
 
 /** Empty fallback when the API key is missing (UI hides the subline). */
@@ -161,9 +161,9 @@ export function normalizeProfileShortDescription(raw: string): string | null {
 export async function generateProfileShortDescription(
 	profile: UserProfile,
 ): Promise<string> {
-	if (!isLlmConfigured()) {
+	if (!(await isLlmAvailable())) {
 		console.warn(
-			"LLM not configured — using profile short description fallback",
+			"LLM unavailable (not configured or daily budget reached) — using profile short description fallback",
 		);
 		return PROFILE_SHORT_DESCRIPTION_FALLBACK;
 	}

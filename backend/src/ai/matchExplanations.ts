@@ -10,7 +10,7 @@ import {
 	resolveOccupationTaskBullets,
 } from "@azuki/shared";
 import { formatProfileSections } from "./index.js";
-import { chatCompletion, isLlmConfigured } from "./llm.js";
+import { chatCompletion, isLlmAvailable } from "./llm.js";
 import {
 	INTEREST_LABELS,
 	NO_GO_LABELS,
@@ -351,9 +351,11 @@ export async function generateMatchExplanations(
 		return { matching: [], notMatching: [] };
 	}
 
-	if (!isLlmConfigured()) {
-		console.warn("LLM not configured — skipping match explanation generation");
-		throw new MatchExplanationsError("LLM not configured");
+	if (!(await isLlmAvailable())) {
+		console.warn(
+			"LLM unavailable (not configured or daily budget reached) — skipping match explanation generation",
+		);
+		throw new MatchExplanationsError("LLM unavailable");
 	}
 
 	const response = await chatCompletion({

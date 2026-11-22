@@ -22,7 +22,9 @@
 		"data:build-destatis-fixture": "npx tsx scripts/build-destatis-fixture.ts",
 		"data:build-dazubi": "npx tsx scripts/build-dazubi-data.ts",
 		"eval:audit-personas": "npx tsx scripts/audit-personas.ts",
-		"eval:rescore": "npx tsx scripts/rescore-snapshot.ts"
+		"eval:rescore": "npx tsx scripts/rescore-snapshot.ts",
+		"aws:build": "node scripts/aws-build.mjs",
+		"aws:deploy": "npm run aws:build && sst deploy --stage production; git checkout -- backend/src/generated/spaIndexTemplate.ts"
 	},
 	"workspaces": [
 		"shared",
@@ -30,6 +32,7 @@
 		"frontend"
 	],
 	"devDependencies": {
-		"exceljs": "^4.4.0"
+		"exceljs": "^4.4.0",
+		"sst": "3.19.3"
 	}
 }

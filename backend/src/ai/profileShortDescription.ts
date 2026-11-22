@@ -1,8 +1,6 @@
 import { type UserProfile, DEFAULT_MODEL_ID } from "@azuki/shared";
-import { getOpenRouterClient } from "./index.js";
+import { chatCompletion, isLlmConfigured } from "./llm.js";
 import { INTEREST_LABELS, SUBJECT_LABELS, STRENGTH_LABELS } from "./labels.js";
-
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 /** Empty fallback when the API key is missing (UI hides the subline). */
 export const PROFILE_SHORT_DESCRIPTION_FALLBACK = "";
@@ -163,24 +161,24 @@ export function normalizeProfileShortDescription(raw: string): string | null {
 export async function generateProfileShortDescription(
 	profile: UserProfile,
 ): Promise<string> {
-	if (!OPENROUTER_API_KEY) {
+	if (!isLlmConfigured()) {
 		console.warn(
-			"OPENROUTER_API_KEY not set — using profile short description fallback",
+			"LLM not configured — using profile short description fallback",
 		);
 		return PROFILE_SHORT_DESCRIPTION_FALLBACK;
 	}
 
-	const response = await getOpenRouterClient().chat.completions.create({
+	const response = await chatCompletion({
 		model: DEFAULT_MODEL_ID,
 		messages: [
 			{ role: "system", content: PROFILE_SHORT_DESCRIPTION_SYSTEM_PROMPT },
 			{ role: "user", content: buildUserPrompt(profile) },
 		],
 		temperature: 0.7,
-		max_tokens: 80,
+		maxTokens: 80,
 	});
 
-	const content = response.choices?.[0]?.message?.content ?? "";
+	const content = response.content;
 	const normalized = normalizeProfileShortDescription(content);
 	if (!normalized) {
 		console.error("Failed to parse profile short description:", content);

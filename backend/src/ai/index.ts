@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import {
 	type AccessLevel,
 	type Occupation,
@@ -21,6 +20,7 @@ import {
 	resolvePreferredJobs,
 } from "../matching/resolvePreferredJobs.js";
 import { FINAL_MATCH_COUNT, PREFILTER_TOP_K } from "../matching/index.js";
+import { chatCompletion, isLlmConfigured, type ChatResponse } from "./llm.js";
 import {
 	EDUCATION_LABELS,
 	INTEREST_LABELS,
@@ -37,26 +37,6 @@ const MAX_DESCRIPTION_LENGTH = 400;
 const MIN_RESULTS = 5;
 const MAX_RESULTS = FINAL_MATCH_COUNT;
 const DEFAULT_REASONING = "Dieser Beruf passt zu deinem Profil.";
-
-// Lazy client construction. Constructing OpenAI at module load throws when
-// OPENROUTER_API_KEY is missing, which broke pure-function tests that just
-// want to import formatProfileSections from this file, and made Vercel cold
-// starts fragile. Defer until the first aiRank() call.
-let _client: OpenAI | null = null;
-function getClient(): OpenAI {
-	if (_client) {
-		return _client;
-	}
-	_client = new OpenAI({
-		baseURL: "https://openrouter.ai/api/v1",
-		apiKey: OPENROUTER_API_KEY,
-	});
-	return _client;
-}
-
-export function getOpenRouterClient(): OpenAI {
-	return getClient();
-}
 
 export interface Ranking {
 	id: number;
@@ -1086,6 +1066,24 @@ async function fetchGenerationCost(
 	}
 }
 
+/**
+ * OpenRouter reports the billed cost via a separate endpoint. Bedrock only
+ * returns token counts, so cost stays 0 there (billing is visible in AWS).
+ */
+async function generationInfo(
+	response: ChatResponse,
+): Promise<GenerationInfo | undefined> {
+	if (response.provider === "openrouter") {
+		return fetchGenerationCost(response.id);
+	}
+	return {
+		model: response.model,
+		cost: 0,
+		tokensInput: response.tokensInput ?? 0,
+		tokensOutput: response.tokensOutput ?? 0,
+	};
+}
+
 export interface AiRankOptions {
 	model?: string;
 	systemPrompt?: string;
@@ -1097,8 +1095,8 @@ export async function aiRank(
 	profile: UserProfile,
 	options: AiRankOptions = {},
 ): Promise<MatchResult> {
-	if (!OPENROUTER_API_KEY) {
-		console.warn("OPENROUTER_API_KEY not set — returning pre-filter results");
+	if (!isLlmConfigured()) {
+		console.warn("LLM not configured — returning pre-filter results");
 		return fallbackResult(scored);
 	}
 
@@ -1110,7 +1108,7 @@ export async function aiRank(
 	const prompt = systemPrompt ?? buildSystemPromptV5();
 	const useContext = withContext ?? true;
 
-	const response = await getClient().chat.completions.create({
+	const response = await chatCompletion({
 		model: selectedModel,
 		messages: [
 			{ role: "system", content: prompt },
@@ -1122,10 +1120,10 @@ export async function aiRank(
 			},
 		],
 		temperature: 0.3,
-		response_format: { type: "json_object" },
+		json: true,
 	});
 
-	const content = response.choices?.[0]?.message?.content ?? "";
+	const content = response.content;
 
 	const rankings = extractRankings(content);
 	if (rankings === null) {
@@ -1183,7 +1181,7 @@ export async function aiRank(
 		}
 	}
 
-	const generation = await fetchGenerationCost(response.id);
+	const generation = await generationInfo(response);
 	if (generation) {
 		result.generation = generation;
 	}

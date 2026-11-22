@@ -9,7 +9,8 @@ import {
 	resolveOccupationShortDescription,
 	resolveOccupationTaskBullets,
 } from "@azuki/shared";
-import { formatProfileSections, getOpenRouterClient } from "./index.js";
+import { formatProfileSections } from "./index.js";
+import { chatCompletion, isLlmConfigured } from "./llm.js";
 import {
 	INTEREST_LABELS,
 	NO_GO_LABELS,
@@ -19,7 +20,6 @@ import {
 	WORK_PREF_LABELS,
 } from "./labels.js";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MAX_PILLS = 5;
 const WEAK_MISMATCH_DIMENSIONS = new Set<MatchSignal["dimension"]>([
 	"subjectMismatch",
@@ -351,25 +351,23 @@ export async function generateMatchExplanations(
 		return { matching: [], notMatching: [] };
 	}
 
-	if (!OPENROUTER_API_KEY) {
-		console.warn(
-			"OPENROUTER_API_KEY not set — skipping match explanation generation",
-		);
-		throw new MatchExplanationsError("OPENROUTER_API_KEY not set");
+	if (!isLlmConfigured()) {
+		console.warn("LLM not configured — skipping match explanation generation");
+		throw new MatchExplanationsError("LLM not configured");
 	}
 
-	const response = await getOpenRouterClient().chat.completions.create({
+	const response = await chatCompletion({
 		model: DEFAULT_MODEL_ID,
 		messages: [
 			{ role: "system", content: SYSTEM_PROMPT },
 			{ role: "user", content: buildUserPrompt(occupation, profile, signals) },
 		],
 		temperature: 0.4,
-		max_tokens: 1000,
-		response_format: { type: "json_object" },
+		maxTokens: 1000,
+		json: true,
 	});
 
-	const content = response.choices?.[0]?.message?.content ?? "";
+	const content = response.content;
 	const pills = parseMatchExplanationContent(content);
 	if (!pills) {
 		console.error("Failed to parse match explanations:", content);

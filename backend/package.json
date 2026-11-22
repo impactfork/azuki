@@ -15,6 +15,7 @@
 		"prettier:ci": "prettier --check src tests"
 	},
 	"dependencies": {
+		"@aws-sdk/client-bedrock-runtime": "3.1175.0",
 		"@azuki/shared": "*",
 		"@hono/node-server": "1.19.17",
 		"@supabase/supabase-js": "^2.105.1",

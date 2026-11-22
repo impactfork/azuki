@@ -38,9 +38,19 @@ export function createRateLimiter({
 	};
 }
 
-// Trusts x-forwarded-for as edge-injected and unspoofable (true on the
-// current Vercel deployment) — re-verify this assumption on any other host.
+// Behind CloudFront (AWS deployment), x-forwarded-for keeps whatever the
+// client sent and appends the real address, so its first entry is
+// spoofable. CloudFront-Viewer-Address ("ip:port", set by CloudFront) is
+// authoritative there and checked first.
+// On Vercel, x-forwarded-for is edge-injected and unspoofable.
 export function getClientIp(c: Context): string {
+	const viewerAddress = c.req.header("cloudfront-viewer-address");
+	if (viewerAddress) {
+		const portSeparator = viewerAddress.lastIndexOf(":");
+		return portSeparator > 0
+			? viewerAddress.slice(0, portSeparator)
+			: viewerAddress;
+	}
 	const forwardedFor = c.req.header("x-forwarded-for");
 	if (forwardedFor) {
 		return forwardedFor.split(",")[0].trim();

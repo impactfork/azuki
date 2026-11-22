@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createRateLimiter } from "../src/rateLimit.js";
+import { Hono } from "hono";
+import { createRateLimiter, getClientIp } from "../src/rateLimit.js";
 
 describe("createRateLimiter", () => {
 	it("allows calls up to the max within the window", () => {
@@ -52,5 +53,35 @@ describe("createRateLimiter", () => {
 		currentTime = 1001;
 		isAllowed("c");
 		expect([...store.keys()]).toEqual(["c"]);
+	});
+});
+
+describe("getClientIp", () => {
+	async function ipFor(headers: Record<string, string>): Promise<string> {
+		const app = new Hono();
+		app.get("/", (c) => c.text(getClientIp(c)));
+		const res = await app.request("/", { headers });
+		return res.text();
+	}
+
+	it("prefers CloudFront-Viewer-Address over a spoofable x-forwarded-for", async () => {
+		expect(
+			await ipFor({
+				"cloudfront-viewer-address": "203.0.113.7:51234",
+				"x-forwarded-for": "1.2.3.4, 203.0.113.7",
+			}),
+		).toBe("203.0.113.7");
+	});
+
+	it("strips the port from an IPv6 viewer address", async () => {
+		expect(
+			await ipFor({ "cloudfront-viewer-address": "2001:db8::1:443" }),
+		).toBe("2001:db8::1");
+	});
+
+	it("falls back to the first x-forwarded-for entry", async () => {
+		expect(await ipFor({ "x-forwarded-for": "198.51.100.2, 10.0.0.1" })).toBe(
+			"198.51.100.2",
+		);
 	});
 });

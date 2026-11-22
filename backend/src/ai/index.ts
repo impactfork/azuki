@@ -1121,6 +1121,7 @@ export async function aiRank(
 		],
 		temperature: 0.3,
 		json: true,
+		task: "ranking",
 	});
 
 	const content = response.content;

@@ -21,10 +21,21 @@ import OpenAI from "openai";
  *   "eu.anthropic.claude-sonnet-5-5" (EU cross-region profile, data stays in
  *   EU regions). Credentials come from the default AWS chain (IAM role on
  *   Lambda, AWS_PROFILE locally).
+ * - BEDROCK_MODEL_ID_RANKING / BEDROCK_MODEL_ID_TEXTS: optional per-task
+ *   override (ranking vs. short texts), falling back to BEDROCK_MODEL_ID
+ * - BEDROCK_EFFORT: "off" (default) | "low" | "medium" | "high". Claude 5.5
+ *   reasons on its own for longer prompts; those tokens are billed as output
+ *   and count against maxTokens, which truncated short answers to nothing.
+ *   "off" disables reasoning, the other values cap it via effort.
  * - BEDROCK_REGION: default AWS_REGION, then "eu-central-1"
  */
 
 export type LlmProvider = "openrouter" | "bedrock";
+
+/** Ranking is the expensive, quality-critical call; texts are short. */
+export type LlmTask = "ranking" | "texts";
+
+export type BedrockEffort = "off" | "low" | "medium" | "high";
 
 export const DEFAULT_BEDROCK_MODEL_ID = "eu.anthropic.claude-sonnet-5-5";
 
@@ -42,6 +53,8 @@ export interface ChatRequest {
 	maxTokens?: number;
 	/** Ask for a JSON object response. */
 	json?: boolean;
+	/** Selects the per-task Bedrock model. Default "texts". */
+	task?: LlmTask;
 }
 
 export interface ChatResponse {
@@ -64,8 +77,46 @@ export function getLlmProvider(): LlmProvider {
 	return value === "bedrock" ? "bedrock" : "openrouter";
 }
 
-export function getBedrockModelId(): string {
-	return process.env.BEDROCK_MODEL_ID?.trim() || DEFAULT_BEDROCK_MODEL_ID;
+export function getBedrockModelId(task: LlmTask = "texts"): string {
+	const perTask =
+		task === "ranking"
+			? process.env.BEDROCK_MODEL_ID_RANKING
+			: process.env.BEDROCK_MODEL_ID_TEXTS;
+	return (
+		perTask?.trim() ||
+		process.env.BEDROCK_MODEL_ID?.trim() ||
+		DEFAULT_BEDROCK_MODEL_ID
+	);
+}
+
+export function getBedrockEffort(): BedrockEffort {
+	const value = (process.env.BEDROCK_EFFORT ?? "").trim().toLowerCase();
+	return value === "low" || value === "medium" || value === "high"
+		? value
+		: "off";
+}
+
+/**
+ * Model-specific request fields that control reasoning. Exported for tests.
+ * Turning reasoning off differs per Claude 5.5 model (verified 2026-11-22):
+ * Haiku accepts "disabled", Sonnet requires "between_tools" (no thinking
+ * before the answer), Opus cannot turn it off, so "off" maps to the lowest
+ * effort there.
+ */
+export function bedrockReasoningFields(
+	effort: BedrockEffort,
+	modelId: string,
+): Record<string, unknown> {
+	if (effort !== "off") {
+		return { output_config: { effort } };
+	}
+	if (modelId.includes("opus")) {
+		return { thinking: { type: "adaptive" }, output_config: { effort: "low" } };
+	}
+	if (/sonnet-5/.test(modelId)) {
+		return { thinking: { type: "between_tools" } };
+	}
+	return { thinking: { type: "disabled" } };
 }
 
 /**
@@ -168,7 +219,7 @@ export function stripCodeFence(content: string): string {
 }
 
 async function bedrockCompletion(request: ChatRequest): Promise<ChatResponse> {
-	const modelId = getBedrockModelId();
+	const modelId = getBedrockModelId(request.task);
 	const { system, messages } = toBedrockMessages(
 		request.messages,
 		Boolean(request.json),
@@ -183,11 +234,21 @@ async function bedrockCompletion(request: ChatRequest): Promise<ChatResponse> {
 			inferenceConfig: {
 				maxTokens: request.maxTokens ?? BEDROCK_DEFAULT_MAX_TOKENS,
 			},
+			additionalModelRequestFields: bedrockReasoningFields(
+				getBedrockEffort(),
+				modelId,
+			) as never,
 		}),
 	);
+	// Only text blocks: reasoningContent blocks are internal deliberation.
 	const text = (response.output?.message?.content ?? [])
 		.map((block) => block.text ?? "")
 		.join("");
+	if (response.stopReason === "max_tokens") {
+		console.warn(
+			`LLM response hit maxTokens (${request.maxTokens ?? BEDROCK_DEFAULT_MAX_TOKENS}) on ${modelId}`,
+		);
+	}
 	return {
 		content: request.json ? stripCodeFence(text) : text,
 		id: response.$metadata.requestId ?? "",

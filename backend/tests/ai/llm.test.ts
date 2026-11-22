@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "vitest";
 import {
 	DEFAULT_BEDROCK_MODEL_ID,
+	bedrockReasoningFields,
+	getBedrockEffort,
 	getBedrockModelId,
 	getLlmProvider,
 	isLlmConfigured,
@@ -8,7 +10,14 @@ import {
 	toBedrockMessages,
 } from "../../src/ai/llm.js";
 
-const ENV_KEYS = ["LLM_PROVIDER", "OPENROUTER_API_KEY", "BEDROCK_MODEL_ID"];
+const ENV_KEYS = [
+	"LLM_PROVIDER",
+	"OPENROUTER_API_KEY",
+	"BEDROCK_MODEL_ID",
+	"BEDROCK_MODEL_ID_RANKING",
+	"BEDROCK_MODEL_ID_TEXTS",
+	"BEDROCK_EFFORT",
+];
 const saved = Object.fromEntries(
 	ENV_KEYS.map((key) => [key, process.env[key]]),
 );
@@ -101,5 +110,46 @@ describe("stripCodeFence", () => {
 		expect(stripCodeFence("Text mit ``` mittendrin")).toBe(
 			"Text mit ``` mittendrin",
 		);
+	});
+});
+
+describe("per-task model and reasoning", () => {
+	test("per-task ids override the shared model id", () => {
+		process.env.BEDROCK_MODEL_ID = "shared";
+		process.env.BEDROCK_MODEL_ID_RANKING = "ranker";
+		Reflect.deleteProperty(process.env, "BEDROCK_MODEL_ID_TEXTS");
+		expect(getBedrockModelId("ranking")).toBe("ranker");
+		expect(getBedrockModelId("texts")).toBe("shared");
+		expect(getBedrockModelId()).toBe("shared");
+	});
+
+	test("effort defaults to off and accepts known levels only", () => {
+		Reflect.deleteProperty(process.env, "BEDROCK_EFFORT");
+		expect(getBedrockEffort()).toBe("off");
+		process.env.BEDROCK_EFFORT = "LOW";
+		expect(getBedrockEffort()).toBe("low");
+		process.env.BEDROCK_EFFORT = "max";
+		expect(getBedrockEffort()).toBe("off");
+	});
+
+	test("off maps to the model-specific way of disabling reasoning", () => {
+		expect(
+			bedrockReasoningFields("off", "eu.anthropic.claude-haiku-5-5"),
+		).toEqual({ thinking: { type: "disabled" } });
+		expect(
+			bedrockReasoningFields("off", "eu.anthropic.claude-sonnet-5-5"),
+		).toEqual({ thinking: { type: "between_tools" } });
+		expect(
+			bedrockReasoningFields("off", "eu.anthropic.claude-opus-5-5"),
+		).toEqual({
+			thinking: { type: "adaptive" },
+			output_config: { effort: "low" },
+		});
+	});
+
+	test("effort levels set output_config for every model", () => {
+		expect(
+			bedrockReasoningFields("medium", "eu.anthropic.claude-sonnet-5-5"),
+		).toEqual({ output_config: { effort: "medium" } });
 	});
 });

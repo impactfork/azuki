@@ -1,6 +1,7 @@
 /**
  * Generates youth-friendly taskBullets fields for all occupations in
- * berufe.json using OpenRouter. Resumable: skips entries that already have them.
+ * berufe.json using the configured LLM provider (OpenRouter or Bedrock, see
+ * backend/src/ai/llm.ts). Resumable: skips entries that already have them.
  *
  */
 
@@ -12,10 +13,15 @@ import {
 	DEFAULT_MODEL_ID,
 	TASK_BULLETS_PROMPT,
 } from "@azuki/shared";
+import {
+	chatCompletion,
+	getBedrockModelId,
+	getLlmProvider,
+	isLlmConfigured,
+} from "../backend/src/ai/llm.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BERUFE_PATH = resolve(__dirname, "../backend/src/data/berufe.json");
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = DEFAULT_MODEL_ID;
 const BATCH_SIZE = 15;
 const MAX_SOURCE_LENGTH = 500;
@@ -123,20 +129,12 @@ function parseBatchResponse(content: string): BatchEntry[] | null {
 async function generateBatch(
 	occupations: Occupation[],
 ): Promise<Map<number, string[]>> {
-	const response = await fetch(
-		"https://openrouter.ai/api/v1/chat/completions",
-		{
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				model: MODEL,
-				messages: [
-					{
-						role: "system",
-						content: `${TASK_BULLETS_PROMPT}
+	const { content } = await chatCompletion({
+		model: MODEL,
+		messages: [
+			{
+				role: "system",
+				content: `${TASK_BULLETS_PROMPT}
 
 Du bekommst mehrere Berufe und schreibst für jeden 2 bis 4 Stichpunkte zu typischen Aufgaben.
 Antworte ausschließlich als JSON-Objekt mit dem Schlüssel "entries", dessen Wert ein Array ist. Ohne Markdown, ohne Vorrede.
@@ -147,27 +145,15 @@ Format:
     { "id": 67890, "taskBullets": ["...", "..."] }
   ]
 }`,
-					},
-					{
-						role: "user",
-						content: `Schreibe für jeden Beruf typische Aufgaben als Stichpunkte:\n\n${formatBatch(occupations)}`,
-					},
-				],
-				temperature: 0.3,
-				response_format: { type: "json_object" },
-			}),
-		},
-	);
-
-	if (!response.ok) {
-		const body = await response.text();
-		throw new Error(`OpenRouter ${response.status}: ${body}`);
-	}
-
-	const data = (await response.json()) as {
-		choices?: Array<{ message?: { content?: string } }>;
-	};
-	const content = data.choices?.[0]?.message?.content ?? "";
+			},
+			{
+				role: "user",
+				content: `Schreibe für jeden Beruf typische Aufgaben als Stichpunkte:\n\n${formatBatch(occupations)}`,
+			},
+		],
+		temperature: 0.3,
+		json: true,
+	});
 	const entries = parseBatchResponse(content);
 	if (!entries) {
 		throw new Error(`Failed to parse batch response: ${content.slice(0, 300)}`);
@@ -197,14 +183,17 @@ function hasTaskBullets(occupation: Occupation): boolean {
 async function main() {
 	const { limit, force } = parseArgs();
 
-	if (!OPENROUTER_API_KEY) {
+	if (!isLlmConfigured()) {
 		throw new Error(
-			"OPENROUTER_API_KEY is required. Set it in .env or pass via --env-file.",
+			"No LLM configured. Set OPENROUTER_API_KEY, or LLM_PROVIDER=bedrock with AWS credentials.",
 		);
 	}
 
 	console.log("=== Generate taskBullets for berufe.json ===\n");
-	console.log(`Model: ${MODEL}`);
+	const provider = getLlmProvider();
+	console.log(
+		`Model: ${provider === "bedrock" ? getBedrockModelId() : MODEL} (${provider})`,
+	);
 	console.log(`Batch size: ${BATCH_SIZE}\n`);
 
 	const occupations: Occupation[] = JSON.parse(
